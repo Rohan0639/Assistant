@@ -1,0 +1,28 @@
+# Environment variables — NEVER commit these (contain API keys)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/
+
+# JARVIS runtime data — personal, don't commit
+jarvis/config/memory.json
+jarvis/config/chat_log.jsonl
+
+# PyInstaller build specs
+*.spec
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,22 @@
+{
+  "user_name": "",
+  "preferences": {
+    "favorite_song": "",
+    "favorite_app": "",
+    "favorite_website": "",
+    "favorite_search": "",
+    "nickname": ""
+  },
+  "shortcuts": {},
+  "usage_stats": {
+    "PLAY_MEDIA": 0,
+    "OPEN_APP": 0,
+    "OPEN_WEBSITE": 0,
+    "SEARCH_WEB": 0,
+    "WORKFLOW": 0,
+    "REMEMBER": 0,
+    "RECALL": 0
+  },
+  "last_seen": "",
+  "style_profile": null
+}
