@@ -107,8 +107,9 @@ RESPONSE RULES:
 APP VS WEBSITE VS MEDIA RULES:
 * Desktop apps (chrome, calc, notepad, vs code) -> use OPEN_APP
 * Websites (youtube, netflix, github, google) -> use OPEN_WEBSITE
-* Playing music/videos ("play dude ost", "play some jazz") -> use PLAY_MEDIA
+* Playing music/videos/songs ("play dude ost", "play some jazz") -> use PLAY_MEDIA (NEVER use PLAY_MUSIC, PLAY_SONG, or any other variant)
 * NEVER use OPEN_APP for websites.
+* The ONLY valid intent strings are: PLAY_MEDIA, OPEN_APP, OPEN_WEBSITE, SEARCH_WEB, SYSTEM_CONTROL, FILE_ACTION, SYSTEM_INFO, RUN_COMMAND, REMEMBER, RECALL, WORKFLOW, UNKNOWN.
 
 ---
 OUTPUT FORMAT (STRICT JSON ONLY):

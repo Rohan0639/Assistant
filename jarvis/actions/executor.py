@@ -30,6 +30,7 @@ from jarvis.core.command import (
     INTENT_FILE_ACTION,
     INTENT_SYSTEM_INFO,
     INTENT_RUN_COMMAND,
+    INTENT_ALIASES,
 )
 from jarvis.actions import media, apps, browser
 from jarvis.actions import workflow_engine
@@ -62,7 +63,7 @@ class ActionExecutor:
         Returns:
             The same Command object, now with success and response set.
         """
-        intent = cmd.intent
+        intent = INTENT_ALIASES.get(cmd.intent, cmd.intent)   # normalise aliases
 
         # -- Phase 5: REMEMBER intent -----------------------------------------
         if intent == INTENT_REMEMBER:

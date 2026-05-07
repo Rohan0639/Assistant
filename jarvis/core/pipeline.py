@@ -26,7 +26,7 @@ Phase 3+ Architecture:
         and stores it in memory.json. Future parses use it automatically.
 """
 
-from jarvis.core.command import Command, INTENT_UNKNOWN
+from jarvis.core.command import Command, INTENT_UNKNOWN, INTENT_ALIASES
 from jarvis.core import input_handler
 from jarvis.core import preprocessor
 from jarvis.core import intent_parser
@@ -192,8 +192,10 @@ class Pipeline:
             execution_errors = []
 
             for action in actions:
-                intent = action.get("intent", "CHAT")
-                if intent == "CHAT" or intent == "INTENT_UNKNOWN":
+                raw_intent = action.get("intent", "CHAT")
+                # Normalise any alias the LLM might have used (e.g. PLAY_MUSIC → PLAY_MEDIA)
+                intent = INTENT_ALIASES.get(raw_intent, raw_intent)
+                if intent == "CHAT" or intent == INTENT_UNKNOWN:
                     continue
                 
                 # Execute each action using a temporary Command object
@@ -204,15 +206,24 @@ class Pipeline:
                 target = action.get("target")
                 value = action.get("value")
                 query = action.get("search_query")
-                
+
                 if intent == "SYSTEM_CONTROL":
                     temp_cmd.entities = {"action": target, "value": str(value) if value is not None else ""}
                 elif intent == "PLAY_MEDIA":
-                    temp_cmd.entities = {"song_name": query if query else target}
+                    # song name may come via search_query or target — accept both
+                    song = query if query else target
+                    temp_cmd.entities = {"song_name": song} if song else {}
                 elif intent == "OPEN_APP":
                     temp_cmd.entities = {"app_name": target}
                 elif intent == "OPEN_WEBSITE":
                     temp_cmd.entities = {"website": target}
+                elif intent == "SYSTEM_INFO":
+                    # executor reads "metric"; LLM puts the metric in "target"
+                    temp_cmd.entities = {"metric": target if target else "all"}
+                elif intent == "RECALL":
+                    temp_cmd.entities = {"key": target if target else "all"}
+                elif intent == "REMEMBER":
+                    temp_cmd.entities = {"key": target if target else "", "value": str(value) if value else ""}
                 else:
                     temp_cmd.entities = {}
                     if target: temp_cmd.entities["target"] = target
@@ -223,6 +234,9 @@ class Pipeline:
                     result_cmd = self._executor.execute(temp_cmd)
                     if not result_cmd.success:
                         execution_errors.append(f"Could not {intent}: {result_cmd.response}")
+                    elif intent in ("SYSTEM_INFO", "RECALL", "SYSTEM_CONTROL"):
+                        # Append the real data underneath the AI's intro sentence
+                        cmd.response += f"\n\n{result_cmd.response}"
 
             # Append any execution errors to the AI's natural response so the user knows
             if execution_errors:

@@ -33,6 +33,34 @@ INTENT_SYSTEM_INFO     = "SYSTEM_INFO"      # Phase 7 - battery, RAM, CPU
 INTENT_RUN_COMMAND     = "RUN_COMMAND"      # Phase 7 - whitelisted shell commands
 INTENT_UNKNOWN         = "UNKNOWN"
 
+# ── Intent aliases (LLM hallucination protection) ─────────────────────────────
+# LLMs sometimes return non-canonical intent names (e.g. PLAY_MUSIC instead of
+# PLAY_MEDIA). Map all known variants → the canonical constant so the executor
+# never has to handle raw strings from the AI directly.
+INTENT_ALIASES: dict[str, str] = {
+    # Media variants
+    "PLAY_MUSIC":       INTENT_PLAY_MEDIA,
+    "PLAY_SONG":        INTENT_PLAY_MEDIA,
+    "MUSIC":            INTENT_PLAY_MEDIA,
+    "PLAY_VIDEO":       INTENT_PLAY_MEDIA,
+    "PLAY_AUDIO":       INTENT_PLAY_MEDIA,
+    # App variants
+    "LAUNCH_APP":       INTENT_OPEN_APP,
+    "OPEN_APPLICATION": INTENT_OPEN_APP,
+    "START_APP":        INTENT_OPEN_APP,
+    # Website variants
+    "OPEN_URL":         INTENT_OPEN_WEBSITE,
+    "BROWSE":           INTENT_OPEN_WEBSITE,
+    "NAVIGATE":         INTENT_OPEN_WEBSITE,
+    # Search variants
+    "WEB_SEARCH":       INTENT_SEARCH_WEB,
+    "GOOGLE":           INTENT_SEARCH_WEB,
+    # Unknown variants
+    "INTENT_UNKNOWN":   INTENT_UNKNOWN,
+    "NONE":             INTENT_UNKNOWN,
+    "CHAT":             INTENT_UNKNOWN,
+}
+
 ALL_INTENTS = {
     INTENT_PLAY_MEDIA,
     INTENT_OPEN_APP,
