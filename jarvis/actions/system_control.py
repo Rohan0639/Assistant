@@ -58,71 +58,37 @@ def unmute() -> tuple[bool, str]:
 def set_volume(level: int) -> tuple[bool, str]:
     """
     Set volume to an absolute level (0-100).
-    Uses PowerShell audio API.
+    Uses a robust fallback: decrease volume to 0 by pressing VolDown 50 times,
+    then increase to the desired level by pressing VolUp (level // 2) times.
     """
     level = max(0, min(100, int(level)))
-    script = (
-        f'$vol = [math]::Round({level} / 100, 2); '
-        f'$obj = New-Object -ComObject WScript.Shell; '
-        f'[Audio]::Volume = $vol'
-    )
-    # Simpler approach: mute first then adjust relative
-    # Set via nircmd alternative using PowerShell COM
-    ps_script = f"""
-$wsh = New-Object -ComObject WScript.Shell
-# Set master volume via Windows Audio Session API
-Add-Type -TypeDefinition @'
-using System.Runtime.InteropServices;
-[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IAudioEndpointVolume {{
-    int _VtblGap1_6();
-    int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
-    int _VtblGap2_1();
-    int GetMasterVolumeLevelScalar(out float pfLevel);
-}}
-[Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-class MMDeviceEnumerator {{}}
-[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IMMDeviceEnumerator {{
-    int _VtblGap1_3();
-    int GetDefaultAudioEndpoint(int dataFlow, int role, out System.IntPtr ppDevice);
-}}
-public class AudioManager {{
-    public static void SetVolume(float level) {{
-        var enumeratorType = Type.GetTypeFromCLSID(new System.Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"));
-        var enumerator = (IMMDeviceEnumerator)System.Activator.CreateInstance(enumeratorType);
-        System.IntPtr devicePtr;
-        enumerator.GetDefaultAudioEndpoint(0, 1, out devicePtr);
-    }}
-}}
-'@
-"""
+    
     try:
-        # Simpler fallback: use relative key presses to approximate
-        # First mute, then set via key simulation isn't perfect for absolute
-        # Use direct PowerShell approach
-        cmd = [
-            "powershell", "-NoProfile", "-NonInteractive", "-Command",
-            f"""
-$obj = New-Object -com WScript.Shell
-$current = (Get-WmiObject -Query "SELECT * FROM Win32_SoundDevice" | Select-Object -First 1)
-Add-Type -TypeDefinition '
-using System.Runtime.InteropServices;
-public class Vol {{
-    [DllImport("winmm.dll")]
-    public static extern int waveOutSetVolume(IntPtr h, uint dwVolume);
-    [DllImport("winmm.dll")]
-    public static extern int waveOutGetVolume(IntPtr h, out uint dwVolume);
-}}'
-$vol = [uint32]([math]::Round({level}/100.0 * 65535)) * 65537
-[Vol]::waveOutSetVolume([IntPtr]::Zero, $vol)
-"""
-        ]
-        subprocess.run(cmd, capture_output=True, timeout=5)
+        # Volume down 50 times to guarantee reaching 0 (each press is 2%)
+        _send_key(174, 50)
+        
+        # Volume up to target level
+        steps_up = level // 2
+        if steps_up > 0:
+            _send_key(175, steps_up)
+            
         return True, f"Volume set to {level}%."
     except Exception as e:
         logger.error("set_volume error: %s", e)
-        return False, f"Couldn't set exact volume. Try 'volume up' or 'volume down'."
+        return False, "Couldn't set exact volume. Try 'volume up' or 'volume down'."
+
+# ── Brightness controls ───────────────────────────────────────────────────────
+
+def set_brightness(level: int) -> tuple[bool, str]:
+    """Set the screen brightness (0-100) using PowerShell WMI."""
+    level = max(0, min(100, int(level)))
+    script = f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, {level})"
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True, capture_output=True)
+        return True, f"Brightness set to {level}%."
+    except Exception as e:
+        logger.error("set_brightness error: %s", e)
+        return False, "I couldn't adjust the brightness on this display."
 
 
 # ── Power controls ────────────────────────────────────────────────────────────
@@ -216,8 +182,14 @@ def handle(action: str, value: str = "") -> tuple[bool, str]:
         return cancel_shutdown()
     elif action in ("lock", "lock_screen", "lock screen"):
         return lock_screen()
+    elif action == "set_brightness":
+        try:
+            lvl = int("".join(c for c in value if c.isdigit()) or "50")
+            return set_brightness(lvl)
+        except ValueError:
+            return False, "Please specify a brightness level like 'set brightness to 70'."
     else:
         return False, (
             f"I don't know the system action '{action}'. "
-            "Try: volume up/down, mute, sleep, shutdown, restart, lock."
+            "Try: volume up/down, mute, set_brightness, sleep, shutdown, restart, lock."
         )

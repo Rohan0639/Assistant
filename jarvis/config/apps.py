@@ -39,6 +39,7 @@ APP_REGISTRY: dict[str, str] = {
     # These are launched via Windows shell protocol
     "instagram":            "shell:AppsFolder\\Facebook.InstagramBeta_8xx8rvfyw5nnt!App",
     "whatsapp":             "shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
+    "snapchat":             "shell:AppsFolder\\www.snapchat.com-42CD23B2_7yxfaf5zmzrp4!App",
 
     # -- Music & Media ---------------------------------------------------------
     "spotify":              rf"{_USER}\AppData\Roaming\Spotify\Spotify.exe",

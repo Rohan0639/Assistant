@@ -35,25 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-_client = None
-
-
-def _get_client():
-    """Return a google-genai client or None if GEMINI_API_KEY not set."""
-    global _client
-    if _client is not None:
-        return _client
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        from google import genai
-        _client = genai.Client(api_key=api_key)
-        return _client
-    except Exception as e:
-        logger.error("Style learner: Gemini init failed: %s", e)
-        return None
-
+from jarvis.core import groq_client
 
 _STYLE_EXTRACTION_PROMPT = """
 You are analyzing how a specific person types messages to their personal AI assistant.
@@ -66,12 +48,12 @@ Here are their recent messages (most recent last):
 Based ONLY on these messages, create a style profile describing how this person communicates.
 Return ONLY a valid JSON object with these exact keys:
 
-{{
+{
   "tone": "one phrase describing their overall tone (e.g. 'casual and informal')",
   "patterns": ["list", "of", "observed", "typing patterns"],
   "examples": ["2-3 example phrases they commonly use"],
   "summary": "2-3 sentence description of how they type and phrase requests"
-}}
+}
 
 Focus on: abbreviations, slang, mixing languages (Hindi-English etc), grammar shortcuts,
 directness, common phrases, sentence length, and punctuation habits.
@@ -81,7 +63,7 @@ Return ONLY the JSON. No explanation. No markdown fences.
 
 def extract_style_profile(recent_messages: list[str]) -> dict | None:
     """
-    Call Gemini to analyze recent messages and extract a style profile.
+    Call Groq to analyze recent messages and extract a style profile.
 
     Args:
         recent_messages: List of raw user message strings.
@@ -89,9 +71,8 @@ def extract_style_profile(recent_messages: list[str]) -> dict | None:
     Returns:
         Style profile dict, or None on failure.
     """
-    client = _get_client()
-    if not client:
-        logger.info("Style learner: GEMINI_API_KEY not set, skipping.")
+    if not groq_client.is_available():
+        logger.info("Style learner: No Groq keys configured, skipping.")
         return None
 
     if len(recent_messages) < 5:
@@ -101,12 +82,13 @@ def extract_style_profile(recent_messages: list[str]) -> dict | None:
     prompt = _STYLE_EXTRACTION_PROMPT.format(messages=sample)
 
     try:
-        from google import genai as google_genai
-        response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
-            contents=prompt,
+        response = groq_client.get_completion(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=250,
         )
-        raw = response.text.strip()
+        raw = response.choices[0].message.content.strip()
 
         # Strip markdown fences if present
         if raw.startswith("```"):
@@ -120,7 +102,7 @@ def extract_style_profile(recent_messages: list[str]) -> dict | None:
         return profile
 
     except Exception as e:
-        logger.error("Style extraction failed: %s", e)
+        logger.warning("Style extraction skipped (Groq error: %s)", e)
         return None
 
 

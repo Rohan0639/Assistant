@@ -87,6 +87,11 @@ class Command:
         # Human-readable message for the Response Layer
         self.response: str = ""
 
+        # Response mode — determines how the UI renders this response
+        # "action" → command was executed (shows [OK]/[!] prefix, green/red color)
+        # "chat"   → conversational reply (no prefix, blue color)
+        self.mode: str = "action"
+
     def is_resolved(self) -> bool:
         """Returns True if intent was successfully identified."""
         return self.intent != INTENT_UNKNOWN

@@ -28,6 +28,7 @@ from jarvis.core.command import (
     INTENT_OPEN_APP,
     INTENT_OPEN_WEBSITE,
     INTENT_SEARCH_WEB,
+    INTENT_SYSTEM_CONTROL,
     INTENT_UNKNOWN,
 )
 
@@ -95,6 +96,100 @@ _DESCRIPTOR_PATTERN = re.compile(
 # e.g. trigger="tell me about" leaves "" remainder, so this is rarely needed,
 # but "what about X" -> remainder starts with "about X"
 _ABOUT_PREFIX = re.compile(r"^about\s+", re.IGNORECASE)
+
+
+# ── SYSTEM_CONTROL entity extraction ──────────────────────────────────────────
+# Maps trigger phrases to the correct action entity for the system_control
+# dispatcher. Volume set commands also extract a numeric value.
+
+# Trigger phrases → action mapping (checked in order, longest first)
+_SYSTEM_CONTROL_MAP: list[tuple[str, str]] = [
+    # Volume
+    ("turn up the volume",     "volume_up"),
+    ("turn down the volume",   "volume_down"),
+    ("increase the volume",    "volume_up"),
+    ("decrease the volume",    "volume_down"),
+    ("raise the volume",       "volume_up"),
+    ("lower the volume",       "volume_down"),
+    ("set the volume to",      "set_volume"),
+    ("set volume to",          "set_volume"),
+    ("change volume to",       "set_volume"),
+    ("volume set",             "set_volume"),
+    ("volume up",              "volume_up"),
+    ("volume down",            "volume_down"),
+    ("volume mute",            "mute"),
+    ("increase volume",        "volume_up"),
+    ("decrease volume",        "volume_down"),
+    ("turn up",                "volume_up"),
+    ("turn down",              "volume_down"),
+    ("louder",                 "volume_up"),
+    ("quieter",                "volume_down"),
+    ("unmute",                 "unmute"),
+    ("mute",                   "mute"),
+    # Power
+    ("shut down",              "shutdown"),
+    ("turn off the pc",        "shutdown"),
+    ("turn off pc",            "shutdown"),
+    ("power off",              "shutdown"),
+    ("shutdown",               "shutdown"),
+    ("restart the pc",         "restart"),
+    ("restart pc",             "restart"),
+    ("restart",                "restart"),
+    ("reboot",                 "restart"),
+    ("go to sleep",            "sleep"),
+    ("sleep mode",             "sleep"),
+    ("sleep",                  "sleep"),
+    ("suspend",                "sleep"),
+    # Screen lock
+    ("lock the screen",        "lock"),
+    ("lock screen",            "lock"),
+    ("lock my pc",             "lock"),
+    ("lock pc",                "lock"),
+    ("lock",                   "lock"),
+]
+
+
+def _extract_system_control(clean_input: str, matched_trigger: str) -> dict:
+    """
+    Extract the action (and optional value) for a SYSTEM_CONTROL intent.
+
+    Uses the trigger phrase to determine the action, and extracts a numeric
+    value from the remainder for set_volume commands.
+
+    Examples:
+        >>> _extract_system_control("volume up", "volume up")
+        {'action': 'volume_up'}
+
+        >>> _extract_system_control("set volume to 60", "set volume to")
+        {'action': 'set_volume', 'value': '60'}
+
+        >>> _extract_system_control("mute", "mute")
+        {'action': 'mute'}
+    """
+    # Look up the action from the trigger
+    action = ""
+    for phrase, act in _SYSTEM_CONTROL_MAP:
+        if phrase in clean_input:
+            action = act
+            break
+
+    if not action:
+        # Fallback: try from the trigger directly
+        action = matched_trigger.replace(" ", "_")
+
+    entities: dict = {"action": action}
+
+    # For set_volume, extract the numeric value from the remainder
+    if action == "set_volume":
+        remainder = _strip_trigger(clean_input, matched_trigger)
+        # Extract digits from remainder (e.g. "60", "60%", "to 60")
+        digits = re.findall(r"\d+", remainder)
+        if digits:
+            entities["value"] = digits[0]
+        else:
+            entities["value"] = "50"  # Default to 50% if no number given
+
+    return entities
 
 
 # ── Core functions ─────────────────────────────────────────────────────────────
@@ -195,6 +290,10 @@ def extract(intent: str, clean_input: str, matched_trigger: str) -> dict:
     """
     if intent == INTENT_UNKNOWN or not matched_trigger:
         return {}
+
+    # ── SYSTEM_CONTROL — special extraction (trigger phrase → action) ─────
+    if intent == INTENT_SYSTEM_CONTROL:
+        return _extract_system_control(clean_input, matched_trigger)
 
     # Step 1: Remove the trigger phrase
     remainder = _strip_trigger(clean_input, matched_trigger)

@@ -29,6 +29,7 @@ from jarvis.core.command import (
     INTENT_OPEN_APP,
     INTENT_OPEN_WEBSITE,
     INTENT_SEARCH_WEB,
+    INTENT_SYSTEM_CONTROL,
     INTENT_UNKNOWN,
 )
 from jarvis.config.intents import INTENT_TRIGGERS
@@ -39,8 +40,9 @@ from jarvis.config.intents import INTENT_TRIGGERS
 # Example: OPEN_WEBSITE before OPEN_APP — both can respond to "open youtube"
 #          but OPEN_WEBSITE is the correct classification.
 _INTENT_PRIORITY: list[str] = [
+    INTENT_SYSTEM_CONTROL,     # ← before OPEN_APP (so "turn up" doesn't trigger "open")
     INTENT_PLAY_MEDIA,
-    INTENT_OPEN_WEBSITE,   # ← before OPEN_APP (more specific)
+    INTENT_OPEN_WEBSITE,       # ← before OPEN_APP (more specific)
     INTENT_OPEN_APP,
     INTENT_SEARCH_WEB,
 ]

@@ -18,7 +18,7 @@ from urllib.parse import quote_plus
 
 def play_media(song_name: str) -> tuple[bool, str]:
     """
-    Play a song by opening a YouTube search in the browser.
+    Play a song by automatically navigating to the first YouTube result.
 
     Args:
         song_name: The name of the song extracted from user input.
@@ -29,7 +29,10 @@ def play_media(song_name: str) -> tuple[bool, str]:
     if not song_name:
         return False, "What song would you like me to play?"
 
-    encoded = quote_plus(song_name)
-    url = f"https://www.youtube.com/search?q={encoded}"
+    # DuckDuckGo's "I'm Feeling Lucky" syntax (!ducky) automatically
+    # redirects to the first search result. We scope it to YouTube.
+    encoded = quote_plus(f"!ducky site:youtube.com {song_name}")
+    url = f"https://duckduckgo.com/?q={encoded}"
     webbrowser.open(url)
+    
     return True, f"Playing '{song_name}' on YouTube..."

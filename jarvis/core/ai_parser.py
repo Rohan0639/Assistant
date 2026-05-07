@@ -24,7 +24,8 @@ import json
 import logging
 
 from dotenv import load_dotenv
-from groq import Groq
+
+from jarvis.core import groq_client
 
 from jarvis.core.command import (
     INTENT_PLAY_MEDIA,
@@ -54,201 +55,161 @@ _VALID_INTENTS = {
 # ── Base system prompt ────────────────────────────────────────────────────────
 
 _BASE_SYSTEM_PROMPT = """
-You are an intent classification engine for a personal desktop assistant.
+You are JARVIS, a precise and reliable AI assistant.
 
-Your job: analyze the user's input and return ONLY a JSON object with:
-  - "intent": one of PLAY_MEDIA, OPEN_APP, OPEN_WEBSITE, SEARCH_WEB, WORKFLOW, REMEMBER, RECALL, SYSTEM_CONTROL, FILE_ACTION, SYSTEM_INFO, RUN_COMMAND, UNKNOWN
-  - "entities": a dict with the relevant extracted value
-  - "confidence": "high", "medium", or "low"
+Your job is to understand the user's request and return structured actions WITHOUT breaking execution.
 
-Intent definitions:
-  PLAY_MEDIA      -- user wants to play music/audio. Entity key: "song_name"
-  OPEN_APP        -- user wants to open a desktop application. Entity key: "app_name"
-  OPEN_WEBSITE    -- user wants to navigate to a specific website. Entity key: "website"
-  SEARCH_WEB      -- user wants to search the web for information. Entity key: "query"
-  WORKFLOW        -- user wants to trigger a multi-step preset routine. Entity key: "workflow_name"
-  REMEMBER        -- user wants to save a preference or fact. Entity keys: "key", "value"
-  RECALL          -- user wants to retrieve a saved fact. Entity key: "key"
-                     Use key="all" if user wants everything recalled.
-  SYSTEM_CONTROL  -- user wants to control OS settings. Entity keys: "action", optional "value"
-                     action values: volume_up, volume_down, mute, unmute, set_volume, sleep, shutdown, restart, lock
-                     value: used for set_volume (e.g. "60" for 60%)
-  FILE_ACTION     -- user wants to open a folder or file. Entity keys: "action", "target"
-                     action values: open_folder, open_file
-                     target: folder name (downloads, desktop, documents, etc.) or file path
-  SYSTEM_INFO     -- user wants system information. Entity key: "metric"
-                     metric values: battery, ram, cpu, disk, all
-  RUN_COMMAND     -- user wants to run a named system command. Entity key: "command_name"
-                     Examples: "ipconfig", "task manager", "disk cleanup", "ping google"
-  UNKNOWN         -- none of the above applies
+---
+CRITICAL RULES (DO NOT BREAK):
+* Only return actions that are explicitly requested in the CURRENT user input
+* NEVER reuse or repeat actions from previous messages
+* NEVER assume previous tasks should continue
+* If the user does not ask → DO NOT include that action
 
-Workflow triggers (WORKFLOW intent):
-  Phrases like "start coding session", "morning routine", "chill mode",
-  "study session", "dev mode", "start my day", "relax", "entertainment mode",
-  "prepare me to work", "focus mode", "start working" should return WORKFLOW.
-  Extract the workflow name from the phrase as naturally as possible.
-  Examples:
-    "start my coding session"  -> WORKFLOW, workflow_name="coding session"
-    "i want to chill"          -> WORKFLOW, workflow_name="chill mode"
-    "morning routine please"   -> WORKFLOW, workflow_name="morning routine"
+---
+CAPABILITY AWARENESS:
+* ONLY use actions that are supported by the system
+* Supported system controls MUST use intent: "SYSTEM_CONTROL" and set the target to:
+  * 'set_volume', 'volume_up', 'volume_down', 'mute', 'unmute'
+  * 'set_brightness'
+* If a request is unsupported → return no action and respond conversationally
 
-REMEMBER intent rules:
-  User is telling you something to save. Extract key and value.
-  Examples:
-    "my name is Rohan"              -> REMEMBER, key="name", value="Rohan"
-    "my favorite song is kesariya" -> REMEMBER, key="favorite_song", value="kesariya"
-    "remember that I like chrome"  -> REMEMBER, key="favorite_app", value="chrome"
-    "save github as my work site"  -> REMEMBER, key="favorite_website", value="github"
-    "call me boss"                 -> REMEMBER, key="name", value="boss"
+---
+VOLUME & BRIGHTNESS RULES (STRICT):
+* Valid range is 0–100
+* If user says "set volume/brightness to X":
+  * If X > 100 → DO NOT execute, return no action and explain briefly
+  * If X is valid → use absolute set with target "set_volume" or "set_brightness" and value X.
+* If user says "volume" or "increase volume":
+  * treat as relative increase (no fixed value required)
+* NEVER auto-convert invalid values (e.g., 220 → 100 is NOT allowed)
 
-RECALL intent rules:
-  User wants to retrieve stored information.
-  Examples:
-    "what's my name?"              -> RECALL, key="name"
-    "what's my favorite song?"     -> RECALL, key="favorite_song"
-    "what do you know about me?"   -> RECALL, key="all"
-    "what have you remembered?"    -> RECALL, key="all"
+---
+MULTI-INTENT RULES:
+* Only include actions clearly present in the current input
+* Do NOT merge with previous actions
+* Each action must be independent and relevant
 
-Single-action intent rules:
-  1. Return ONLY valid JSON. No explanation. No markdown. No code blocks.
-  2. For PLAY_MEDIA: extract the song/artist name. If vague, make a reasonable interpretation.
-  3. For OPEN_APP: extract just the app name.
-  4. For OPEN_WEBSITE: extract just the site name or URL.
-  5. For SEARCH_WEB: extract the full search query.
-  6. If the user expresses a mood or feeling, infer the most logical action.
-     Examples:
-       "I'm bored"          -> PLAY_MEDIA, song_name="upbeat music"
-       "I feel stressed"    -> PLAY_MEDIA, song_name="calming music"
-       "I need to code"     -> OPEN_APP, app_name="vs code"
-  7. The user may type casually, in mixed language (Hindi-English), with
-     abbreviations or slang. Understand intent regardless of grammar.
+---
+BROWSER / MEDIA RULES:
+* You DO NOT have control over existing browser tabs
+* NEVER say:
+  * "I will use the same tab"
+  * "I will not open a new tab"
+* Always give realistic responses:
+  * e.g., "Opening YouTube and playing it for you"
 
-SYSTEM_CONTROL examples:
-  "volume up"               -> SYSTEM_CONTROL, action="volume_up"
-  "turn down the volume"    -> SYSTEM_CONTROL, action="volume_down"
-  "mute" / "silence"        -> SYSTEM_CONTROL, action="mute"
-  "set volume to 60"        -> SYSTEM_CONTROL, action="set_volume", value="60"
-  "sleep" / "suspend"       -> SYSTEM_CONTROL, action="sleep"
-  "shutdown" / "turn off"   -> SYSTEM_CONTROL, action="shutdown"
-  "restart" / "reboot"      -> SYSTEM_CONTROL, action="restart"
-  "lock" / "lock screen"    -> SYSTEM_CONTROL, action="lock"
+---
+RESPONSE RULES:
+* Be natural and human-like
+* DO NOT claim something is done unless action is valid
+---
+APP VS WEBSITE VS MEDIA RULES:
+* Desktop apps (chrome, calc, notepad, vs code) -> use OPEN_APP
+* Websites (youtube, netflix, github, google) -> use OPEN_WEBSITE
+* Playing music/videos ("play dude ost", "play some jazz") -> use PLAY_MEDIA
+* NEVER use OPEN_APP for websites.
 
-FILE_ACTION examples:
-  "open downloads"          -> FILE_ACTION, action="open_folder", target="downloads"
-  "open desktop folder"     -> FILE_ACTION, action="open_folder", target="desktop"
-  "show documents"          -> FILE_ACTION, action="open_folder", target="documents"
-  "open pictures"           -> FILE_ACTION, action="open_folder", target="pictures"
-  "open my resume"          -> FILE_ACTION, action="open_file", target="resume"
+---
+OUTPUT FORMAT (STRICT JSON ONLY):
+{
+  "emotion": "bored/sad/stressed/happy/neutral",
+  "actions": [
+    {
+      "intent": "OPEN_APP",
+      "target": "chrome",
+      "value": null,
+      "search_query": null
+    },
+    {
+      "intent": "OPEN_WEBSITE",
+      "target": "youtube",
+      "value": null,
+      "search_query": null
+    },
+    {
+      "intent": "PLAY_MEDIA",
+      "target": null,
+      "value": null,
+      "search_query": "dude ost"
+    }
+  ],
+  "response": "natural human-like response"
+}
 
-SYSTEM_INFO examples:
-  "how's my battery"        -> SYSTEM_INFO, metric="battery"
-  "how much ram is free"    -> SYSTEM_INFO, metric="ram"
-  "cpu usage"               -> SYSTEM_INFO, metric="cpu"
-  "disk space"              -> SYSTEM_INFO, metric="disk"
-  "system status"           -> SYSTEM_INFO, metric="all"
-
-RUN_COMMAND examples:
-  "run ipconfig"            -> RUN_COMMAND, command_name="ipconfig"
-  "open task manager"       -> RUN_COMMAND, command_name="task manager"
-  "disk cleanup"            -> RUN_COMMAND, command_name="disk cleanup"
-  "ping google"             -> RUN_COMMAND, command_name="ping google"
-
-Output format (strictly):
-{"intent": "INTENT_NAME", "entities": {"key": "value"}, "confidence": "high"}
-
-If no entity can be extracted, use an empty dict: {}
+---
+IMPORTANT:
+* 'target' is the app, website, or action target (e.g. 'chrome', 'youtube', 'set_volume').
+* 'value' is for numbers (e.g. 50 for volume).
+* 'search_query' is for song names or search terms.
+* If no valid action -> return "actions": []
+* DO NOT guess missing values
+* DO NOT hallucinate capabilities
+* DO NOT include previous context actions
 """.strip()
 
+# ── Groq client configuration ─────────────────────────────────────────────────
 
-# ── Groq client (lazy init) ───────────────────────────────────────────────────
-
-_client: Groq | None = None
-
-
-def _get_client() -> Groq | None:
-    """Return Groq client, or None if API key not configured."""
-    global _client
-    if _client is not None:
-        return _client
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        logger.warning("GROQ_API_KEY not set. AI parser unavailable.")
-        return None
-    _client = Groq(api_key=api_key)
-    return _client
+def is_available() -> bool:
+    """Return True if the Groq AI parser is configured and ready."""
+    return groq_client.is_available()
 
 
 # ── Style profile injection ───────────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
+    from jarvis.core import memory
+    style_profile = memory.get("style_profile", "")
+    prompt = _BASE_SYSTEM_PROMPT
+    if style_profile:
+        prompt += f"\n\nUSER'S PREFERRED STYLE:\n{style_profile}"
+    return prompt
+
+
+# ── Parsing ───────────────────────────────────────────────────────────────────
+
+def parse(
+    user_input: str,
+    recent_context: list[str] | None = None
+) -> tuple[list[dict], str, str]:
     """
-    Build the full system prompt by injecting the user's style profile.
-
-    The style profile is extracted by Gemini (style_learner.py) from the
-    user's chat history and stored in memory.json. Here we inject it into
-    the Groq system prompt so the LLM understands casual/mixed inputs.
-    """
-    try:
-        from jarvis.core import memory
-        from jarvis.core import style_learner
-
-        style_profile = memory.get("style_profile")
-        if style_profile and isinstance(style_profile, dict):
-            hint = style_learner.build_style_hint(style_profile)
-            if hint:
-                return _BASE_SYSTEM_PROMPT + "\n\n--- USER STYLE PROFILE ---\n" + hint
-    except Exception:
-        pass
-    return _BASE_SYSTEM_PROMPT
-
-
-# ── Main parse function ───────────────────────────────────────────────────────
-
-def parse(user_input: str, recent_context: list[str] | None = None) -> tuple[str, dict]:
-    """
-    Parse user input using Groq LLM and return (intent, entities).
+    Parse natural language into a list of actionable intents + conversational response.
 
     Args:
-        user_input:      Raw or normalized user text.
-        recent_context:  Optional list of recent messages for context (max 5).
+        user_input: The raw string from the user.
+        recent_context: Optional rolling window of the conversation.
 
     Returns:
-        (intent, entities) — same shape as intent_parser + entity_extractor.
-        Returns (INTENT_UNKNOWN, {}) on any failure so the pipeline falls back.
-
-    Examples:
-        >>> parse("play kesariya")
-        ('PLAY_MEDIA', {'song_name': 'kesariya'})
-
-        >>> parse("bhai open chrome yaar")      # casual -- style profile helps
-        ('OPEN_APP', {'app_name': 'chrome'})
+        (actions, ai_response, emotion)
+        actions is a list of dicts: [{"intent": ..., "target": ..., "value": ..., "search_query": ...}]
+        ai_response is the human-like response generated by the LLM.
+        emotion is the detected user emotion.
     """
-    client = _get_client()
-    if not client:
-        return INTENT_UNKNOWN, {}
+    if not is_available():
+        return [], "", "neutral"
 
     system_prompt = _build_system_prompt()
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    # Build user message: optional context block + current command
-    parts = []
     if recent_context:
-        context_block = "Recent conversation context:\n" + "\n".join(
-            f"  - {m}" for m in recent_context[-5:]
+        history_str = "\n".join(recent_context)
+        context_prompt = (
+            f"--- RECENT CONVERSATION HISTORY ---\n{history_str}\n"
+            "--- END HISTORY ---\n\n"
+            "CRITICAL: Use the history above ONLY to understand context (like 'open it', or 'no'). "
+            "DO NOT output actions for past requests. ONLY output actions for the CURRENT user request below. "
+            "You MUST still output STRICT JSON."
         )
-        parts.append(context_block)
-    parts.append(f"Current command: {user_input}")
+        messages.append({"role": "system", "content": context_prompt})
 
-    full_input = "\n\n".join(parts)
+    messages.append({"role": "user", "content": user_input})
 
     try:
-        response = _get_client().chat.completions.create(
+        response = groq_client.get_completion(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": full_input},
-            ],
-            temperature=0.1,
-            max_tokens=150,
+            messages=messages,
+            temperature=0.7,   # Allow slightly more creativity for the natural response
+            max_tokens=400,
         )
 
         raw = response.choices[0].message.content.strip()
@@ -262,24 +223,21 @@ def parse(user_input: str, recent_context: list[str] | None = None) -> tuple[str
 
         data = json.loads(raw)
 
-        intent   = data.get("intent", INTENT_UNKNOWN)
-        entities = data.get("entities", {})
+        actions = data.get("actions", [])
+        ai_response = data.get("response", "")
+        emotion = data.get("emotion", "neutral")
+        
+        # If no actions array but intent is CHAT, handle gracefully
+        if not actions and data.get("intent") == "CHAT":
+            actions = [{"intent": "CHAT"}]
 
-        if intent not in _VALID_INTENTS:
-            logger.warning("Groq returned unknown intent: %s", intent)
-            return INTENT_UNKNOWN, {}
-
-        return intent, entities
+        return actions, ai_response, emotion
 
     except json.JSONDecodeError as e:
         logger.error("Groq returned invalid JSON: %s | raw=%s", e, locals().get("raw", ""))
-        return INTENT_UNKNOWN, {}
+        return INTENT_UNKNOWN, {}, ""
 
     except Exception as e:
         logger.error("Groq parser error: %s", e)
-        return INTENT_UNKNOWN, {}
+        return INTENT_UNKNOWN, {}, ""
 
-
-def is_available() -> bool:
-    """Return True if the Groq AI parser is configured and ready."""
-    return _get_client() is not None

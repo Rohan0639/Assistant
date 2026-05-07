@@ -28,11 +28,10 @@ import json
 import os
 from datetime import datetime
 
-# Absolute path to the memory file
-_MEMORY_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "config", "memory.json"
-)
+# Use the user's home directory to persist memory across sessions/exe runs
+_MEMORY_DIR = os.path.expanduser("~/.jarvis")
+os.makedirs(_MEMORY_DIR, exist_ok=True)
+_MEMORY_FILE = os.path.join(_MEMORY_DIR, "memory.json")
 
 # In-memory cache (loaded once per session)
 _cache: dict | None = None
@@ -156,6 +155,11 @@ def get_user_name() -> str:
     return get("user_name", "")
 
 
+def get_agent_name() -> str:
+    """Return the stored agent name (defaults to 'JARVIS' if not set)."""
+    return get("agent_name", "JARVIS") or "JARVIS"
+
+
 def get_all() -> dict:
     """Return the entire memory dict (for display/debug)."""
     return _load()
@@ -167,6 +171,9 @@ def get_all() -> dict:
 _KEY_MAP = {
     "name":             "user_name",
     "user_name":        "user_name",
+    "agent_name":       "agent_name",
+    "your_name":        "agent_name",
+    "assistant_name":   "agent_name",
     "favorite_song":    "preferences.favorite_song",
     "favorite_app":     "preferences.favorite_app",
     "favorite_website": "preferences.favorite_website",

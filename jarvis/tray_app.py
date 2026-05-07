@@ -22,7 +22,9 @@ from jarvis.core import memory
 class JarvisTrayApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("JARVIS")
+        # Load agent and user names from persistent memory
+        agent_name = memory.get_agent_name()
+        self.root.title(agent_name)
         self.root.geometry("500x400")
         self.root.configure(bg="#1e1e1e")
         self.root.attributes("-topmost", True)
@@ -42,17 +44,9 @@ class JarvisTrayApp:
 
     def _build_ui(self):
         """Build the tkinter UI components."""
-        # Output Text Area
-        self.chat_area = scrolledtext.ScrolledText(
-            self.root, wrap=tk.WORD, bg="#1e1e1e", fg="#ffffff", 
-            font=("Consolas", 11), borderwidth=0, highlightthickness=0
-        )
-        self.chat_area.pack(padx=10, pady=(10, 5), fill=tk.BOTH, expand=True)
-        self.chat_area.config(state=tk.DISABLED)
-
-        # Input Frame
+        # Input Frame (pack at BOTTOM first)
         input_frame = tk.Frame(self.root, bg="#333333")
-        input_frame.pack(padx=10, pady=(0, 10), fill=tk.X)
+        input_frame.pack(padx=10, pady=(0, 10), fill=tk.X, side=tk.BOTTOM)
 
         self.input_entry = tk.Entry(
             input_frame, bg="#333333", fg="#ffffff", font=("Consolas", 12),
@@ -61,18 +55,27 @@ class JarvisTrayApp:
         self.input_entry.pack(padx=10, pady=10, fill=tk.X, side=tk.LEFT, expand=True)
         self.input_entry.bind("<Return>", self.handle_input)
 
+        # Output Text Area (pack at TOP)
+        self.chat_area = scrolledtext.ScrolledText(
+            self.root, wrap=tk.WORD, bg="#1e1e1e", fg="#ffffff", 
+            font=("Consolas", 11), borderwidth=0, highlightthickness=0
+        )
+        self.chat_area.pack(padx=10, pady=(10, 5), fill=tk.BOTH, expand=True, side=tk.TOP)
+        self.chat_area.config(state=tk.DISABLED)
+
     def _initial_greeting(self):
         """Show initial personalized greeting."""
+        agent_name = memory.get_agent_name()
         name = memory.get_user_name()
         last = memory.get("last_seen")
         if name and last:
-            greeting = f"Welcome back, {name}! (Last seen: {last})"
+            greeting = f"Welcome back, {name}! Last seen: {last}."
         elif name:
-            greeting = f"Hello, {name}! Good to see you."
+            greeting = f"Hello, {name}! Ready when you are."
         else:
-            greeting = "Ready. Tell me your name to get started!"
-        
-        self._append_to_chat("JARVIS", greeting, is_system=True)
+            greeting = f"Hey! I'm {agent_name}. Tell me your name to get started — or just ask me anything."
+
+        self._append_to_chat(agent_name, greeting, is_system=True, mode="chat")
         memory.update_last_seen()
 
     def create_default_icon(self):
@@ -99,18 +102,39 @@ class JarvisTrayApp:
         """Hide the Tkinter window instead of destroying it completely."""
         self.root.withdraw()
 
-    def _append_to_chat(self, sender, message, is_system=False):
-        """Helper to append text to the chat area."""
+    def _append_to_chat(self, sender, message, is_system=False, mode="action"):
+        """Helper to append text to the chat area with mode-aware styling."""
         self.chat_area.config(state=tk.NORMAL)
+
         if sender == "You":
-            color = "#00c8ff" # Cyan for user
+            # User messages: cyan
+            sender_color = "#00c8ff"
+        elif mode == "chat":
+            # Conversational JARVIS reply: soft assistant-blue, no prefix
+            sender_color = "#7eb8f7"
+        elif is_system:
+            # System messages (greeting, startup): bright green
+            sender_color = "#00ff7f"
         else:
-            color = "#00ff00" if is_system else "#aaaaaa" # Green or Gray for JARVIS
-            
-        self.chat_area.insert(tk.END, f"{sender}: ", ("sender",))
-        self.chat_area.insert(tk.END, f"{message}\n\n")
-        
-        self.chat_area.tag_config("sender", foreground=color, font=("Consolas", 11, "bold"))
+            # Action responses: green (success) or orange-red (failure)
+            sender_color = "#00e676" if is_system else "#ff6b6b"
+            # Re-evaluate: is_system is passed as cmd.success for action responses
+            # (naming is historical). Reuse the value correctly:
+            sender_color = "#00e676" if is_system else "#ff7043"
+
+        # Format the message body
+        if sender == "JARVIS" and mode == "chat":
+            body = f"{message}\n\n"
+        elif sender == "JARVIS":
+            prefix = "✓" if is_system else "✗"
+            body = f"{prefix} {message}\n\n"
+        else:
+            body = f"{message}\n\n"
+
+        tag = f"sender_{sender}_{mode}"
+        self.chat_area.insert(tk.END, f"{sender}: ", (tag,))
+        self.chat_area.insert(tk.END, body)
+        self.chat_area.tag_config(tag, foreground=sender_color, font=("Consolas", 11, "bold"))
         self.chat_area.see(tk.END)
         self.chat_area.config(state=tk.DISABLED)
 
@@ -121,7 +145,7 @@ class JarvisTrayApp:
             return
 
         self.input_entry.delete(0, tk.END)
-        self._append_to_chat("You", raw)
+        self._append_to_chat("You", raw, mode="action")
 
         # Run pipeline process in a separate thread so it doesn't freeze the GUI
         threading.Thread(target=self._process_command_thread, args=(raw,), daemon=True).start()
@@ -130,12 +154,18 @@ class JarvisTrayApp:
         """Background thread to process the command and update GUI safely."""
         try:
             cmd = self.pipeline.process(raw)
-            prefix = "[OK]" if cmd.success else "[!]"
-            response = f"{prefix} {cmd.response}"
-            # Update GUI from the main thread safely
-            self.root.after(0, self._append_to_chat, "JARVIS", response, cmd.success)
+            if cmd.mode == "chat":
+                # Conversational reply — no prefix, different color
+                self.root.after(
+                    0, self._append_to_chat, "JARVIS", cmd.response, True, "chat"
+                )
+            else:
+                # Action response — keep existing success/failure styling
+                self.root.after(
+                    0, self._append_to_chat, "JARVIS", cmd.response, cmd.success, "action"
+                )
         except Exception as e:
-            self.root.after(0, self._append_to_chat, "JARVIS", f"Error: {str(e)}", False)
+            self.root.after(0, self._append_to_chat, "JARVIS", f"Error: {str(e)}", False, "action")
 
     def exit_app(self, icon=None, item=None):
         """Cleanly shut down the application from the tray."""

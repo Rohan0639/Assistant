@@ -17,7 +17,7 @@ import sys
 import os
 
 # Force UTF-8 output on Windows terminals
-if sys.stdout.encoding != 'utf-8':
+if sys.stdout is not None and sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 # Ensure project root (parent of jarvis/) is on the path when running directly
@@ -73,9 +73,16 @@ def build_pipeline() -> Pipeline:
 
 
 def format_response(cmd) -> str:
-    """Format the assistant's response for display."""
-    prefix = "[OK] JARVIS:" if cmd.success else "[!] JARVIS:"
-    return f"\n  {prefix} {cmd.response}\n"
+    """Format the assistant's response for display.
+
+    For chat mode (cmd.mode == "chat"), return the raw response without any prefix.
+    For action mode, include a success/failure prefix.
+    """
+    if getattr(cmd, "mode", None) == "chat":
+        return f"\n  {cmd.response}\n"
+    else:
+        prefix = "[OK] JARVIS:" if cmd.success else "[!] JARVIS:"
+        return f"\n  {prefix} {cmd.response}\n"
 
 
 def run():

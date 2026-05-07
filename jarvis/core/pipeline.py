@@ -34,6 +34,9 @@ from jarvis.core import entity_extractor
 from jarvis.core import ai_parser          # Phase 3+
 from jarvis.core import chat_logger        # Style learning
 from jarvis.core import style_learner      # Style learning
+from jarvis.core import chat_responder     # Phase 8: conversational chat mode
+from jarvis.core import chat_memory_extractor  # Phase 8: smart chat memory
+from jarvis.core import memory             # Phase 8: user name for personalization
 
 
 class Pipeline:
@@ -55,12 +58,15 @@ class Pipeline:
 
     def __init__(self):
         self._executor = None
-        self._recent_context: list[str] = []   # Rolling window of last 5 inputs
+        self._recent_context: list[str] = []   # Rolling window: "You: ...", "JARVIS: ..."
 
         # Check once at startup whether AI is available
         self._ai_available = ai_parser.is_available()
+        self._chat_available = chat_responder.is_available()
         if self._ai_available:
             print("  [AI] Groq parser active (llama-3.3-70b) + Gemini style learning")
+            if self._chat_available:
+                print("  [AI] Conversational chat mode: active (witty + warm)")
             # Show style status
             total = chat_logger.get_total_count()
             if total >= chat_logger.STYLE_EXTRACTION_THRESHOLD:
@@ -75,24 +81,6 @@ class Pipeline:
         """Inject the action executor."""
         self._executor = executor
 
-    def _parse_with_ai(self, cmd: Command) -> tuple[Command, bool]:
-        """
-        Attempt AI parsing. Returns (cmd, success).
-        Fills cmd.intent and cmd.entities if successful.
-        Passes recent context so Gemini can resolve follow-up commands.
-        """
-        intent, entities = ai_parser.parse(
-            cmd.clean_input,
-            recent_context=self._recent_context
-        )
-
-        if intent == INTENT_UNKNOWN or not entities:
-            # AI returned nothing useful -- trigger fallback
-            return cmd, False
-
-        cmd.intent   = intent
-        cmd.entities = entities
-        return cmd, True
 
     def _maybe_learn_style(self) -> None:
         """
@@ -119,23 +107,31 @@ class Pipeline:
     def _parse_with_rules(self, cmd: Command) -> Command:
         """
         Phase 2 rule-based parsing pipeline (fallback).
+
+        When this method cannot determine an intent, it returns the command
+        with INTENT_UNKNOWN and NO response set, so the caller (process())
+        can route the input to the LLM chat responder instead of showing
+        a canned error.
         """
         # Preprocess
-        cmd.clean_input = preprocessor.process(cmd.clean_input)
+        preprocessed = preprocessor.process(cmd.clean_input)
 
-        if not cmd.clean_input:
-            cmd.response = "I heard you, but what would you like me to do?"
+        if not preprocessed:
+            # Preprocessor stripped everything (e.g. just "hi" or "hello").
+            # Leave intent as UNKNOWN with no response — caller will route
+            # to LLM chat responder.
             return cmd
 
         # Intent
-        cmd.intent, matched_trigger = intent_parser.parse(cmd.clean_input)
+        cmd.intent, matched_trigger = intent_parser.parse(preprocessed)
 
         if cmd.intent == INTENT_UNKNOWN:
-            cmd.response = (
-                "I'm not sure what you mean. "
-                "Try 'play <song>', 'open <app>', 'go to <site>', or 'search <query>'."
-            )
+            # Rules couldn't classify — leave response empty so the caller
+            # routes to LLM chat responder.
             return cmd
+
+        # Update clean_input with the preprocessed version for entity extraction
+        cmd.clean_input = preprocessed
 
         # Entities
         cmd.entities = entity_extractor.extract(
@@ -143,10 +139,7 @@ class Pipeline:
         )
 
         if not cmd.entities:
-            cmd.response = (
-                f"I understood you want to {cmd.intent.replace('_', ' ').lower()}, "
-                f"but I couldn't figure out what. Could you be more specific?"
-            )
+            cmd.response = f"I understood you want to {cmd.intent.replace('_', ' ').lower()}, but I couldn't figure out what. Could you be more specific?"
             return cmd
 
         return cmd
@@ -174,40 +167,144 @@ class Pipeline:
         # -- Stage 1b: Log the message for style learning ---------------------
         chat_logger.log(raw_input)
 
-        # -- Stage 1c: Update rolling context window --------------------------
-        self._recent_context.append(raw_input)
-        if len(self._recent_context) > 5:
-            self._recent_context.pop(0)
-
-        # -- Stage 1d: Maybe trigger style learning (silent, non-blocking) ----
+        # -- Stage 1c: Maybe trigger style learning (silent, non-blocking) ----
         if self._ai_available:
             self._maybe_learn_style()
 
         # -- Stage 2: Parse intent + entities ---------------------------------
         parsed = False
+        ai_response = ""
+        actions = []
 
         if self._ai_available:
-            cmd, parsed = self._parse_with_ai(cmd)
-
-        if not parsed:
-            # Either AI unavailable or AI returned UNKNOWN -- use rules
-            cmd = self._parse_with_rules(cmd)
-            # If rule parsing already set a response (guard fired), return
-            if cmd.response:
-                return cmd
-
-        # -- Stage 3: Guard -- intent resolved but still no entities ----------
-        if cmd.intent != INTENT_UNKNOWN and not cmd.entities:
-            cmd.response = (
-                f"I understood you want to {cmd.intent.replace('_', ' ').lower()}, "
-                f"but I couldn't figure out what. Could you be more specific?"
+            actions, ai_response, emotion = ai_parser.parse(
+                cmd.clean_input, self._recent_context
             )
+            if actions or ai_response:
+                parsed = True
+
+        # -- Fast Path for AI-parsed input (single or multiple actions) -------
+        if parsed:
+            cmd.success = True
+            cmd.mode = "chat"
+            cmd.response = ai_response if ai_response else "Done."
+
+            execution_errors = []
+
+            for action in actions:
+                intent = action.get("intent", "CHAT")
+                if intent == "CHAT" or intent == "INTENT_UNKNOWN":
+                    continue
+                
+                # Execute each action using a temporary Command object
+                temp_cmd = Command(raw_input)
+                temp_cmd.intent = intent
+                
+                # Map entities
+                target = action.get("target")
+                value = action.get("value")
+                query = action.get("search_query")
+                
+                if intent == "SYSTEM_CONTROL":
+                    temp_cmd.entities = {"action": target, "value": str(value) if value is not None else ""}
+                elif intent == "PLAY_MEDIA":
+                    temp_cmd.entities = {"song_name": query if query else target}
+                elif intent == "OPEN_APP":
+                    temp_cmd.entities = {"app_name": target}
+                elif intent == "OPEN_WEBSITE":
+                    temp_cmd.entities = {"website": target}
+                else:
+                    temp_cmd.entities = {}
+                    if target: temp_cmd.entities["target"] = target
+                    if value: temp_cmd.entities["value"] = str(value)
+                    if query: temp_cmd.entities["query"] = query
+
+                if self._executor:
+                    result_cmd = self._executor.execute(temp_cmd)
+                    if not result_cmd.success:
+                        execution_errors.append(f"Could not {intent}: {result_cmd.response}")
+
+            # Append any execution errors to the AI's natural response so the user knows
+            if execution_errors:
+                cmd.response += "\n\nHowever, I ran into some issues: " + ", ".join(execution_errors)
+
+            # Silently extract any important personal info in the background
+            chat_memory_extractor.extract_async(cmd.raw_input)
+
+            # Store this turn in context before returning
+            self._recent_context.append(f"You: {raw_input}")
+            self._recent_context.append(f"JARVIS: {cmd.response}")
+            self._recent_context = self._recent_context[-10:]  # Keep last 5 turns
             return cmd
 
-        # -- Stage 4: Execute action ------------------------------------------
+        # -- Fallback path: AI parser failed or unavailable -------------------
+        # Try rule-based parser as fallback
+        cmd = self._parse_with_rules(cmd)
+
+        if cmd.intent == INTENT_UNKNOWN:
+            # Both AI and rules couldn't classify this — it's conversational chat.
+            # Use the LLM chat responder to generate a real reply instead of
+            # a canned error message.
+            user_name = memory.get_user_name()
+            cmd.response = chat_responder.reply(
+                cmd.raw_input,
+                recent_context=self._recent_context,
+                user_name=user_name,
+            )
+            cmd.success = True
+            cmd.mode    = "chat"
+
+            chat_memory_extractor.extract_async(cmd.raw_input)
+
+            self._recent_context.append(f"You: {raw_input}")
+            self._recent_context.append(f"JARVIS: {cmd.response}")
+            self._recent_context = self._recent_context[-10:]  # Keep last 5 turns
+            return cmd
+
+        # -- Fallback Stage 3: Guard -- intent resolved but still no entities --
+        if cmd.intent != INTENT_UNKNOWN and not cmd.entities:
+            user_name = memory.get_user_name()
+            if self._chat_available:
+                cmd.response = chat_responder.reply(
+                    cmd.raw_input,
+                    recent_context=self._recent_context,
+                    user_name=user_name,
+                    action_result=f"I understood the intent ({cmd.intent}) but couldn't determine what specifically to act on.",
+                )
+            else:
+                cmd.response = (
+                    f"I understood you want to {cmd.intent.replace('_', ' ').lower()}, "
+                    f"but I couldn't figure out what. Could you be more specific?"
+                )
+            cmd.success = True
+            cmd.mode = "chat"
+            self._recent_context.append(f"You: {raw_input}")
+            self._recent_context.append(f"JARVIS: {cmd.response}")
+            self._recent_context = self._recent_context[-10:]
+            return cmd
+
+        # -- Fallback Stage 4: Execute action ---------------------------------
         if self._executor:
             cmd = self._executor.execute(cmd)
         else:
             cmd.response = f"[Parsed OK] intent={cmd.intent}, entities={cmd.entities}"
 
+        # -- Fallback Stage 5: Make the response conversational ---------------
+        executor_response = cmd.response
+        if self._chat_available:
+            user_name = memory.get_user_name()
+            cmd.response = chat_responder.reply(
+                cmd.raw_input,
+                recent_context=self._recent_context,
+                user_name=user_name,
+                action_result=executor_response,
+            )
+        cmd.mode = "chat"
+
+        # -- Fallback Stage 6: Update rolling conversation context ------------
+        self._recent_context.append(f"You: {raw_input}")
+        self._recent_context.append(f"JARVIS: {cmd.response}")
+        self._recent_context = self._recent_context[-10:]  # Keep last 5 turns
+
         return cmd
+
