@@ -137,8 +137,13 @@ assistant/
 │   │   ├── intents.py           # Rule-based intent patterns
 │   │   └── memory.json          # Persistent user data (auto-updated)
 │   └── utils/                   # Shared utilities
+├── docs/                        # Documentation
+│   └── jarvis_assistant_roadmap.pdf
+├── scripts/                     # Build & Utility scripts
+│   └── build_tray.bat
 ├── .env.example                 # Template for API keys
 ├── .gitignore                   # Git exclusions
+├── requirements.txt             # Full project dependencies
 ├── requirements-tray.txt        # Tray-specific dependencies
 └── JARVIS.spec                  # PyInstaller build spec
 ```

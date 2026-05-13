@@ -1,4 +1,8 @@
 @echo off
+set "SCRIPT_DIR=%~dp0"
+set "ROOT_DIR=%SCRIPT_DIR%.."
+cd /d "%ROOT_DIR%"
+
 echo Building JARVIS Tray Application...
 
 echo Installing PyInstaller and required packages...
