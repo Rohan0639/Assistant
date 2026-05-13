@@ -17,33 +17,44 @@
 | 📊 **System Info** | Battery, RAM, CPU, disk space (`how's my battery?`) |
 | ⌨️ **Shell Commands** | Run whitelisted commands (`run ipconfig`, `ping google`) |
 | 🔁 **Workflows** | Multi-step routines (`start coding session`, `morning routine`) |
-| 🧠 **Memory** | Remembers your name, preferences across sessions |
+| 🧠 **Memory** | Remembers your name, preferences, and facts across sessions |
 | 🤖 **Style Learning** | Learns how *you* type using Gemini — gets smarter over time |
+| 💬 **Conversational** | Witty, warm chat mode powered by Groq (llama-3.3-70b) |
 
 ---
 
 ## 🧱 Architecture
 
+JARVIS uses a hybrid pipeline that prioritizes AI understanding but falls back to robust rule-based parsing.
+
 ```
-User Input
-    │
-    ▼
-[Chat Logger]  ──── saves every message → learns your style via Gemini
-    │
-    ▼
-[Groq AI Parser (llama-3.3-70b)]
-    │   ↑ style profile injected from memory.json
-    ▼
+[User Input]
+     │
+     ▼
+[Pipeline Orchestrator]
+     │
+     ├─[Stage 1: Input Handler]─── Normalizes text (case, spacing)
+     │
+     ├─[Stage 2: AI Path] (Primary)
+     │    ├─[Chat Logger]───────── Logs history for style learning
+     │    ├─[AI Parser (Groq)]──── Intent + Entity extraction via Llama 3.3
+     │    └─[Style Learner (Gemini)] Extracts your typing profile
+     │
+     ├─[Stage 3: Fallback Path] (Offline/Rules)
+     │    ├─[Preprocessor]──────── Removes noise / stop words
+     │    ├─[Intent Parser]─────── Regex-based classification
+     │    └─[Entity Extractor]──── Keyword-based entity extraction
+     │
+     ▼
 [Action Executor]
-    ├── media.py          → YouTube
-    ├── apps.py           → subprocess / Store apps
-    ├── browser.py        → webbrowser
-    ├── system_control.py → volume / power / lock
-    ├── file_actions.py   → Explorer / os.startfile
-    ├── system_info.py    → psutil
-    ├── shell_runner.py   → whitelisted commands
-    ├── workflow_engine.py→ multi-step chains
-    └── memory (REMEMBER/RECALL)
+     ├── media.py          → YouTube integration
+     ├── apps.py           → Subprocess / Windows Store apps
+     ├── browser.py        → Webbrowser automation
+     ├── system_control.py → Volume / Power / Lock controls
+     ├── file_actions.py   → Explorer / OS integration
+     ├── system_info.py    → Hardware stats (psutil)
+     ├── shell_runner.py   → Whitelisted command execution
+     └── workflow_engine.py→ Multi-step routine coordinator
 ```
 
 ---
@@ -55,7 +66,11 @@ User Input
 ```bash
 git clone https://github.com/YOUR_USERNAME/jarvis-assistant.git
 cd jarvis-assistant
-pip install -r requirements.txt
+# Recommended: Create a virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+# Note: requirements.txt is being updated; currently check requirements-tray.txt for UI deps
+pip install groq google-genai psutil python-dotenv pystray Pillow
 ```
 
 ### 2. Set API Keys
@@ -67,30 +82,19 @@ GROQ_API_KEY=your_groq_key_here
 GEMINI_API_KEY=your_gemini_key_here
 ```
 
-- **Groq** (free): [console.groq.com](https://console.groq.com) — powers all command parsing
-- **Gemini** (free): [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) — learns your typing style
+- **Groq** (free): [console.groq.com](https://console.groq.com) — Powers all command parsing and conversational chat.
+- **Gemini** (free): [aistudio.google.com](https://aistudio.google.com/app/apikey) — Learns your typing style for personalized interactions.
 
 ### 3. Run
 
+**CLI Mode:**
 ```bash
 python jarvis/main.py
 ```
 
----
-
-## 🗣️ Example Commands
-
-```
-rohan: play arijit singh
-rohan: open instagram
-rohan: volume up
-rohan: how's my battery
-rohan: open downloads
-rohan: run ipconfig
-rohan: start coding session
-rohan: my favorite song is kesariya
-rohan: what do you know about me?
-rohan: shutdown
+**System Tray Mode (GUI):**
+```bash
+python jarvis/tray_app.py
 ```
 
 ---
@@ -100,35 +104,43 @@ rohan: shutdown
 ```
 assistant/
 ├── jarvis/
-│   ├── main.py                  # Entry point
-│   ├── tray_app.py              # System tray integration
-│   ├── core/
+│   ├── main.py                  # CLI Entry point
+│   ├── tray_app.py              # System tray integration (GUI)
+│   ├── core/                    # Intelligence Layer
 │   │   ├── pipeline.py          # Orchestrates all stages
 │   │   ├── ai_parser.py         # Groq LLM intent parser
+│   │   ├── groq_client.py       # Wrapper for Groq API
+│   │   ├── chat_responder.py    # Conversational chat logic
 │   │   ├── style_learner.py     # Gemini style extraction
 │   │   ├── chat_logger.py       # Conversation history log
 │   │   ├── memory.py            # Persistent user memory
-│   │   └── command.py           # Command data contract
-│   ├── actions/
+│   │   ├── chat_memory_extractor.py # Background memory extraction
+│   │   ├── entity_extractor.py  # Rule-based entity extraction
+│   │   ├── intent_parser.py     # Rule-based intent parsing
+│   │   ├── preprocessor.py      # Input cleaning for rules
+│   │   ├── input_handler.py     # Initial text normalization
+│   │   └── command.py           # Command data contract & constants
+│   ├── actions/                 # Execution Layer
 │   │   ├── executor.py          # Dispatches to handlers
+│   │   ├── workflow_engine.py   # Multi-step routines coordinator
 │   │   ├── apps.py              # App launcher
 │   │   ├── browser.py           # Web/search opener
 │   │   ├── media.py             # YouTube player
 │   │   ├── system_control.py    # Volume/power controls
 │   │   ├── file_actions.py      # File/folder opener
 │   │   ├── system_info.py       # Hardware stats
-│   │   ├── shell_runner.py      # Whitelisted shell commands
-│   │   └── workflow_engine.py   # Multi-step routines
-│   ├── config/
+│   │   └── shell_runner.py      # Whitelisted shell commands
+│   ├── config/                  # User Configuration
 │   │   ├── apps.py              # App registry (add your apps here)
 │   │   ├── shell_commands.py    # Shell command whitelist
 │   │   ├── workflows.py         # Workflow definitions
 │   │   ├── intents.py           # Rule-based intent patterns
-│   │   └── memory.json          # Persistent user data
-│   └── utils/
-├── requirements.txt
-├── .env.example
-└── .gitignore
+│   │   └── memory.json          # Persistent user data (auto-updated)
+│   └── utils/                   # Shared utilities
+├── .env.example                 # Template for API keys
+├── .gitignore                   # Git exclusions
+├── requirements-tray.txt        # Tray-specific dependencies
+└── JARVIS.spec                  # PyInstaller build spec
 ```
 
 ---
@@ -160,36 +172,28 @@ Edit `jarvis/config/shell_commands.py`:
 
 ## 🔒 Security
 
-- API keys are stored in `.env` — **never committed to git**
-- Shell commands use a **strict whitelist** — no arbitrary execution
-- Style learning is fully local — only message patterns sent to Gemini, no personal data
-
----
-
-## 📋 Requirements
-
-- Python 3.11+
-- Windows 10/11
-- `groq`, `google-genai`, `psutil`, `python-dotenv`, `pystray`, `Pillow`
+- **Local First**: Your memory and logs are stored locally in `jarvis/config/`.
+- **API Privacy**: Only message patterns are sent to Gemini for style learning; no sensitive data is exported.
+- **Whitelisting**: Shell commands use a strict whitelist to prevent accidental execution of harmful commands.
+- **Environment Safety**: API keys are managed via `.env` and excluded from version control.
 
 ---
 
 ## 🛣️ Roadmap
 
-- [x] Phase 1 — Core pipeline
-- [x] Phase 2 — Rule-based parsing
-- [x] Phase 3 — Groq AI parser
-- [x] Phase 4 — Workflow engine
-- [x] Phase 5 — Persistent memory
-- [x] Phase 6 — System tray
-- [x] Phase 7 — Full OS access
-- [x] Style learning via Gemini
-- [ ] Voice input (speech-to-text)
-- [ ] Reminder & alarm system
-- [ ] Plugin system for custom actions
+- [x] Phase 1-3 — Core AI Pipeline & Rule-based fallbacks
+- [x] Phase 4 — Multi-step Workflow Engine
+- [x] Phase 5 — Persistent Memory (Name, preferences)
+- [x] Phase 6 — System Tray Integration
+- [x] Phase 7 — Advanced OS Control (Volume, Power, Hardware Info)
+- [x] Phase 8 — Conversational Chat Mode & Style Learning
+- [ ] Voice input (Speech-to-Text)
+- [ ] Visual Dashboard for status monitoring
+- [ ] Plugin system for custom user modules
 
 ---
 
 ## 📄 License
 
-MIT License — free to use, modify, and distribute.
+MIT License — Free to use, modify, and distribute.
+
