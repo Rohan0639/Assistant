@@ -111,7 +111,12 @@ The resulting file will be in the `dist/` folder.
 
 ```
 assistant/
-├── jarvis/
+├── .venv/                       # Python virtual environment
+├── build/                       # PyInstaller build artifacts
+├── dist/                        # Compiled executables
+├── docs/                        # Documentation
+│   └── jarvis_assistant_roadmap.pdf
+├── jarvis/                      # Core Source Code
 │   ├── main.py                  # CLI Entry point
 │   ├── tray_app.py              # System tray integration (GUI)
 │   ├── core/                    # Intelligence Layer
@@ -145,15 +150,15 @@ assistant/
 │   │   ├── intents.py           # Rule-based intent patterns
 │   │   └── memory.json          # Persistent user data (auto-updated)
 │   └── utils/                   # Shared utilities
-├── docs/                        # Documentation
-│   └── jarvis_assistant_roadmap.pdf
 ├── scripts/                     # Build & Utility scripts
 │   └── build_tray.bat
+├── .env                         # API Keys (Local only)
 ├── .env.example                 # Template for API keys
 ├── .gitignore                   # Git exclusions
-├── requirements.txt             # Full project dependencies
+├── JARVIS.spec                  # PyInstaller build spec
+├── README.md                    # This file
 ├── requirements-tray.txt        # Tray-specific dependencies
-└── JARVIS.spec                  # PyInstaller build spec
+└── requirements.txt             # Full project dependencies
 ```
 
 ---
