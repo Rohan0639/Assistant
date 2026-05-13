@@ -69,8 +69,8 @@ cd jarvis-assistant
 # Recommended: Create a virtual environment
 python -m venv .venv
 .venv\Scripts\activate
-# Note: requirements.txt is being updated; currently check requirements-tray.txt for UI deps
-pip install groq google-genai psutil python-dotenv pystray Pillow
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ### 2. Set API Keys
@@ -96,6 +96,14 @@ python jarvis/main.py
 ```bash
 python jarvis/tray_app.py
 ```
+
+### 🔨 Building (.exe)
+
+To build the standalone Windows executable:
+```bash
+.\scripts\build_tray.bat
+```
+The resulting file will be in the `dist/` folder.
 
 ---
 
