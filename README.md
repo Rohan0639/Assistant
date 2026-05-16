@@ -196,20 +196,7 @@ Edit `jarvis/config/shell_commands.py`:
 - **Environment Safety**: API keys are managed via `.env` and excluded from version control.
 
 ---
-
-## 🛣️ Roadmap
-
-- [x] Phase 1-3 — Core AI Pipeline & Rule-based fallbacks
-- [x] Phase 4 — Multi-step Workflow Engine
-- [x] Phase 5 — Persistent Memory (Name, preferences)
-- [x] Phase 6 — System Tray Integration
-- [x] Phase 7 — Advanced OS Control (Volume, Power, Hardware Info)
-- [x] Phase 8 — Conversational Chat Mode & Style Learning
-- [ ] Voice input (Speech-to-Text)
-- [ ] Visual Dashboard for status monitoring
-- [ ] Plugin system for custom user modules
-
----
+ki
 
 ## 📄 License
 
